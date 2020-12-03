@@ -1,200 +1,139 @@
 package se.miun.dt070a.mqttbroker;
 
-import se.miun.dt070a.mqttbroker.MessageType;
+import io.reactivex.rxjava3.core.Observable;
+import io.reactivex.rxjava3.disposables.Disposable;
+import io.reactivex.rxjava3.schedulers.Schedulers;
+import se.miun.dt070a.mqttbroker.response.ConnectResponse;
 
+import java.io.BufferedReader;
+import java.io.IOError;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 public class MQTTBroker {
 
-    public static class MalformedMQTTRequestException extends Throwable {
+    private boolean stopListening = false;
 
-        public MalformedMQTTRequestException() {}
+    private ServerSocket serverSocket;
 
-        public MalformedMQTTRequestException(String message) {
-            super(message);
+    private Map<Integer, Disposable> disposables;
+
+    private Disposable mainDisposable;
+
+    private Observable<Socket> connections;
+
+    private int socketId = 0;
+
+    //private Map<String, Client> = new HashMap<>();
+
+
+    private Response handleRequest(Request request) {
+        switch (request.getMessageType()) {
+            case CONNECT:
+                return new ConnectResponse(request.getSocket());
+
+            default:
+                return null;
+
         }
     }
 
-    public static abstract class Request {
+    public void run() {
+        System.out.println("Entering run!");
 
-        private InputStream inputStream;
-        public int remaining = 0;
+        disposables = new HashMap<>();
 
-        protected Request(InputStream inputStream) throws IOException {
-            this.inputStream = inputStream;
-            remaining = inputStream.read();
-        }
+        mainDisposable = listenForIncomingConnectionRequests().observeOn(Schedulers.io())
+                .doOnNext(s -> System.out.println("tcp connection accepted...now waiting for incoming request"))
+                .doOnSubscribe(d -> System.out.println("subscribed to connections"))
+                //.doOnSubscribe(this::storeDisposable)
+                .map(Request::parseRequest) //TODO handle MalformedMQTTRequestError
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .map(this::handleRequest)   //response
 
-        protected int nextByteIfRemainingElseThrow() throws IOException, MalformedMQTTRequestException {
-            if (remaining-- <= 0) {
-                throw new MalformedMQTTRequestException();
-            }
-            return inputStream.read();
-        }
-
-        protected byte[] nextNBytesIfRemainingElseThrow(int n) throws IOException, MalformedMQTTRequestException {
-            remaining -= n;
-            if (remaining < 0) {
-                throw new MalformedMQTTRequestException();
-            }
-
-            return inputStream.readNBytes(n);
-        }
-
-        public abstract void createFromInputStream() throws IOException;
-
-        public static Optional<Request> parseRequest(InputStream inputStream) throws IOException, MalformedMQTTRequestException {
-            //first byte of the header   |0|1|2|3|4|5|6|7
-            //                           |  type |d|QoS|r
-            int flags = inputStream.read();
-
-            Optional<Request> request;
-
-            try {
-                MessageType type = MessageType.headerFlagsToMessageType(flags);
-
-                switch (type) {
-                    case CONNECT:
-                        request = Optional.of(new ConnectRequest(inputStream)); break;
-                    default:
-                        request = Optional.empty();  //should not happen (UnknownMessageType is thrown)
-                }
+                .doOnDispose(() -> System.out.println("Disposed of connection"))
+                .subscribe(Response::send
+                        , Throwable::printStackTrace
+                        , () -> System.out.println("Connections completed"));
 
 
-            } catch (UnknownMessageTypeError unknownMessageTypeError) {
-                throw new MalformedMQTTRequestException("Unknown request type");
-            }
+        System.out.println("Exiting run!");
+    }
 
-            request.ifPresent(r -> {
-                try {
-                    r.createFromInputStream();
-                } catch (IOException e) {
-                    e.printStackTrace();
+    private Observable<Socket> listenForIncomingConnectionRequests() {
+        try {
+            serverSocket = new ServerSocket(1883);
+
+            return Observable.create(emitter -> {
+                while (!emitter.isDisposed()) {
+                    Socket socket = serverSocket.accept();
+                    emitter.onNext(socket);
                 }
             });
 
-            return request;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return Observable.error(new IOError(e));
         }
+
     }
 
-
-    public static class ConnectRequest extends Request {
-
-        private boolean userName;
-        private boolean password;
-        private boolean willRetain;
-        private int willQoS;
-        private boolean willFlag;
-        private boolean cleanSession;
-
-        public ConnectRequest(InputStream inputStream) throws IOException {
-            super(inputStream);
-        }
-
-        private void parseConnectFlags(int flags) {
-            userName = (flags & 128) != 0;   // 10000000
-            password = (flags & 64) != 0;    // 01000000
-            willRetain = (flags & 32) != 0;  // 00100000
-            willQoS = (flags & 24) >> 3;     // 00011000
-            willFlag = (flags & 4) != 0;     // 00000100
-            cleanSession = (flags & 2) != 0; // 00000010
-                                             // 00000001 is reserved
-        }
-
-        public void createFromInputStream() throws IOException {
-
-            System.out.println("remaining: " + remaining);
-
-            if (remaining == 0)
-                return;
-
-            try {
-                int lengthMSB = nextByteIfRemainingElseThrow();
-                int lengthLSB = nextByteIfRemainingElseThrow();
-
-                //move significant bit 8 steps to the left
-                int variableLengthHeaderLength = (lengthMSB << 8) + lengthLSB;
-                System.out.println("Variable length header length: " + variableLengthHeaderLength);
-
-            /*
-            The variable header for the CONNECT Packet consists of four fields in the following order:
-             - Protocol Name
-             - Protocol Level
-             - Connect Flags
-             - Keep Alive.
-             */
-                byte[] bytes = nextNBytesIfRemainingElseThrow(variableLengthHeaderLength);
-                System.out.println("Protocol name: " + new String(bytes));
-
-                int protocolLevel = nextByteIfRemainingElseThrow();  //Level 4 is MQTT vs 3
-                System.out.println("Protocol level: " + protocolLevel);
-
-                int connectFlags = nextByteIfRemainingElseThrow();
-                System.out.println("connect flags: " + Integer.toBinaryString(connectFlags));
-
-                int keepAliveMSB = nextByteIfRemainingElseThrow();
-                int keepAliveLSB = nextByteIfRemainingElseThrow();
-                int keepAlive = (keepAliveMSB << 8) + keepAliveLSB;
-                System.out.println("Keep alive (seconds): " + keepAlive);
-
-            /*
-            The payload of the CONNECT Packet contains one or more length-prefixed fields, whose presence
-            is determined by the flags in the variable header. These fields,
-            if present, MUST appear in the order
-             - Client Identifier
-             - Will Topic
-             - Will Message
-             - User Name
-             - Password
-            */
-
-                int clientIdentifierLengthMSB = nextByteIfRemainingElseThrow();
-                int clientIdentifierLengthLSB = nextByteIfRemainingElseThrow();
-                int clienIdentifierLength = (clientIdentifierLengthMSB << 8) + clientIdentifierLengthLSB;
-                System.out.println("client id length: " + clienIdentifierLength);
-
-                byte[] clientIdBuffer = nextNBytesIfRemainingElseThrow(clienIdentifierLength);
-                System.out.println("client id: " + new String(clientIdBuffer));
-
-            } catch (MalformedMQTTRequestException mqttRequestException) {
-                System.out.println("Malformed mqtt request");
-            }
-
-        }
+    private void storeDisposable(Disposable d) {
+        disposables.put(socketId++, d);
     }
 
-    public static void main(String[] args) {
+    public void shutdown() throws IOException {
+//        for (Disposable d : disposables.values()) {
+//            d.dispose();
+//        }
+       // disposables.clear();
+        mainDisposable.dispose();
+        serverSocket.close();
+    }
 
+    public static void main(String[] args){
         try {
-            ServerSocket serverSocket = new ServerSocket(1883);
+        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 
-            System.out.println("Broker listening...");
 
-            Socket socket = serverSocket.accept();
+        MQTTBroker broker = new MQTTBroker();
+        Disposable disposable = Observable.just(broker)
+                .subscribeOn(Schedulers.single())
+                .doOnNext(MQTTBroker::run)
+                //.doOnDispose(broker::shutdown)
+                .doOnSubscribe(d -> System.out.println("Broker is running...press <enter> to stop"))
+                .subscribe();
 
-            System.out.println("tcp connection accepted...now waiting for incoming request");
+            br.readLine();
 
-            InputStream in = socket.getInputStream();
-
-//            byte[] buffer = new byte[32];
-//            in.read(buffer);
-//
-//            for (byte b : buffer) {
-//                System.out.println(Integer.toBinaryString(b));
-//            }
-
-            try {
-                Optional<Request> newRequest = Request.parseRequest(in);
-            } catch (MalformedMQTTRequestException e) {
-                e.printStackTrace();
-            }
-
+            disposable.dispose();
+            Schedulers.shutdown();
         } catch (IOException e) {
             e.printStackTrace();
         }
+
+//        Scanner scanner = new Scanner(System.in);
+//
+//        MQTTBroker broker = new MQTTBroker();
+//
+//        broker.start();
+//
+//        System.out.println("Broker is running...\npress <enter> to stop");
+//
+//        scanner.nextLine();
+//
+//        try {
+//            broker.shutdown();
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
+//
+//        System.out.println("Exiting main!");
     }
 }
