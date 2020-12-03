@@ -1,6 +1,6 @@
 package se.miun.dt070a.mqttbroker.request;
 
-import se.miun.dt070a.mqttbroker.MalformedMQTTRequestError;
+import se.miun.dt070a.mqttbroker.error.MalformedMQTTRequestError;
 import se.miun.dt070a.mqttbroker.MessageType;
 import se.miun.dt070a.mqttbroker.Request;
 
@@ -32,7 +32,7 @@ public class ConnectRequest extends Request {
 
     public void createFromInputStream() throws IOException {
 
-        System.out.println("remaining: " + remaining);
+        //System.out.println("remaining: " + remaining);
 
         if (remaining == 0)
             return;
@@ -43,7 +43,7 @@ public class ConnectRequest extends Request {
 
             //move significant bit 8 steps to the left
             int variableLengthHeaderLength = (lengthMSB << 8) + lengthLSB;
-            System.out.println("Variable length header length: " + variableLengthHeaderLength);
+            //System.out.println("Variable length header length: " + variableLengthHeaderLength);
 
         /*
         The variable header for the CONNECT Packet consists of four fields in the following order:
@@ -53,18 +53,18 @@ public class ConnectRequest extends Request {
          - Keep Alive.
          */
             byte[] bytes = nextNBytesIfRemainingElseThrow(variableLengthHeaderLength);
-            System.out.println("Protocol name: " + new String(bytes));
+            //System.out.println("Protocol name: " + new String(bytes));
 
             int protocolLevel = nextByteIfRemainingElseThrow();  //Level 4 is MQTT vs 3
-            System.out.println("Protocol level: " + protocolLevel);
+            //System.out.println("Protocol level: " + protocolLevel);
 
             int connectFlags = nextByteIfRemainingElseThrow();
-            System.out.println("connect flags: " + Integer.toBinaryString(connectFlags));
+            //System.out.println("connect flags: " + Integer.toBinaryString(connectFlags));
 
             int keepAliveMSB = nextByteIfRemainingElseThrow();
             int keepAliveLSB = nextByteIfRemainingElseThrow();
             int keepAlive = (keepAliveMSB << 8) + keepAliveLSB;
-            System.out.println("Keep alive (seconds): " + keepAlive);
+            //System.out.println("Keep alive (seconds): " + keepAlive);
 
         /*
         The payload of the CONNECT Packet contains one or more length-prefixed fields, whose presence
@@ -80,10 +80,10 @@ public class ConnectRequest extends Request {
             int clientIdentifierLengthMSB = nextByteIfRemainingElseThrow();
             int clientIdentifierLengthLSB = nextByteIfRemainingElseThrow();
             int clienIdentifierLength = (clientIdentifierLengthMSB << 8) + clientIdentifierLengthLSB;
-            System.out.println("client id length: " + clienIdentifierLength);
+            //System.out.println("client id length: " + clienIdentifierLength);
 
             byte[] clientIdBuffer = nextNBytesIfRemainingElseThrow(clienIdentifierLength);
-            System.out.println("client id: " + new String(clientIdBuffer));
+            //System.out.println("client id: " + new String(clientIdBuffer));
 
         } catch (MalformedMQTTRequestError mqttRequestException) {
             System.out.println("Malformed mqtt request");
