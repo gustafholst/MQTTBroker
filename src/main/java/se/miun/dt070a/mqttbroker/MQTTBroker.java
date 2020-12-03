@@ -1,14 +1,16 @@
 package se.miun.dt070a.mqttbroker;
 
+import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Observable;
 import io.reactivex.rxjava3.disposables.Disposable;
 import io.reactivex.rxjava3.schedulers.Schedulers;
+import io.reactivex.rxjava3.subjects.PublishSubject;
+import io.reactivex.rxjava3.subjects.Subject;
+import se.miun.dt070a.mqttbroker.error.ConnectError;
 import se.miun.dt070a.mqttbroker.response.ConnectResponse;
+import se.miun.dt070a.mqttbroker.response.PingResponse;
 
-import java.io.BufferedReader;
-import java.io.IOError;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
@@ -17,7 +19,7 @@ import java.util.Optional;
 
 public class MQTTBroker {
 
-    private boolean stopListening = false;
+    private boolean acceptConnections = true;
 
     private ServerSocket serverSocket;
 
@@ -25,7 +27,7 @@ public class MQTTBroker {
 
     private Disposable mainDisposable;
 
-    private Observable<Socket> connections;
+    private Subject<Socket> connections;
 
     private int socketId = 0;
 
@@ -36,59 +38,79 @@ public class MQTTBroker {
         switch (request.getMessageType()) {
             case CONNECT:
                 return new ConnectResponse(request.getSocket());
-
+            case PINGREQ:
+                return new PingResponse(request.getSocket());
             default:
                 return null;
 
         }
     }
 
-    public void run() {
-        System.out.println("Entering run!");
-
+    public void run() throws IOException {
         disposables = new HashMap<>();
+        connections = PublishSubject.create();
 
-        mainDisposable = listenForIncomingConnectionRequests().observeOn(Schedulers.io())
-                .doOnNext(s -> System.out.println("tcp connection accepted...now waiting for incoming request"))
-                .doOnSubscribe(d -> System.out.println("subscribed to connections"))
-                //.doOnSubscribe(this::storeDisposable)
-                .map(Request::parseRequest) //TODO handle MalformedMQTTRequestError
+        Completable.create(emitter -> listenForIncomingConnectionRequests())
+                .subscribeOn(Schedulers.single())
+                .subscribe();
+
+        mainDisposable = connections
+                //.flatMap(s -> Observable.just(s).observeOn(Schedulers.io()))
+                .doOnNext(s -> MQTTLogger.log("tcp connection accepted...now waiting for incoming request"))
+                .subscribe(this::listenToSocket);
+    }
+
+    private void listenForIncomingConnectionRequests() throws IOException {
+        serverSocket = new ServerSocket(1883);
+            while (acceptConnections) {
+                Socket socket = serverSocket.accept();
+                Observable.<Socket>create(emitter -> {
+                    emitter.onNext(socket);
+                }).observeOn(Schedulers.io()).subscribe(connections);
+            }
+    }
+
+    private void handleError(Throwable error) {
+        if (error instanceof ConnectError) {
+            // send out last LWT in case needed
+
+//            Socket socket = ((ConnectError) error).getSocket();
+//            Disposable d = disposables.get(socket.hashCode());
+            //d.dispose();
+        }
+    }
+
+    private void listenToSocket(Socket socket) {
+        Observable.<Optional<Request>>create(emitter -> {
+            while (!emitter.isDisposed()) {
+                if (socket.isClosed()) {
+                    emitter.onError(new ConnectError(socket));
+                }
+                Optional<Request> request = Request.parseRequest(socket);
+                emitter.onNext(request);
+            }
+        })//TODO handle MalformedMQTTRequestError
+                //.subscribeOn(Schedulers.trampoline())
+                .doOnSubscribe(d -> storeDisposable(d, socket))
+                .doOnError(this::handleError)
+                .onErrorComplete(err -> err instanceof ConnectError)
                 .filter(Optional::isPresent)
                 .map(Optional::get)
+                .doOnNext(MQTTLogger::logRequest)
                 .map(this::handleRequest)   //response
-
-                .doOnDispose(() -> System.out.println("Disposed of connection"))
+                .doOnNext(MQTTLogger::logResponse)
+                //.doOnDispose(() -> System.out.println("Disposed of connection"))
                 .subscribe(Response::send
                         , Throwable::printStackTrace
-                        , () -> System.out.println("Connections completed"));
-
-
-        System.out.println("Exiting run!");
+                        , () -> MQTTLogger.log("Client closed the socket"));
     }
 
-    private Observable<Socket> listenForIncomingConnectionRequests() {
-        try {
-            serverSocket = new ServerSocket(1883);
-
-            return Observable.create(emitter -> {
-                while (!emitter.isDisposed()) {
-                    Socket socket = serverSocket.accept();
-                    emitter.onNext(socket);
-                }
-            });
-
-        } catch (IOException e) {
-            e.printStackTrace();
-            return Observable.error(new IOError(e));
-        }
-
-    }
-
-    private void storeDisposable(Disposable d) {
-        disposables.put(socketId++, d);
+    private void storeDisposable(Disposable d, Socket socket) {
+        disposables.put(socket.hashCode(), d);
     }
 
     public void shutdown() throws IOException {
+        acceptConnections = false;
 //        for (Disposable d : disposables.values()) {
 //            d.dispose();
 //        }

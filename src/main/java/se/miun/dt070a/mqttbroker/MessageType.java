@@ -1,5 +1,7 @@
 package se.miun.dt070a.mqttbroker;
 
+import se.miun.dt070a.mqttbroker.error.UnknownMessageTypeError;
+
 import java.util.Arrays;
 import java.util.Optional;
 

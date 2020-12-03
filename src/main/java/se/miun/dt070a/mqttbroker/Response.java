@@ -3,7 +3,7 @@ package se.miun.dt070a.mqttbroker;
 import java.io.IOException;
 import java.net.Socket;
 
-public class Response {
+public abstract class Response {
 
     private Socket socket;
 
@@ -17,4 +17,6 @@ public class Response {
         socket.getOutputStream().write(header);
     }
 
+    public abstract MessageType getMessageType();
+    public abstract byte getMessageTypeAsByte();
 }

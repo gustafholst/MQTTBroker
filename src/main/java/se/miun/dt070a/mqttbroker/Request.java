@@ -1,10 +1,15 @@
 package se.miun.dt070a.mqttbroker;
 
+import se.miun.dt070a.mqttbroker.error.ConnectError;
+import se.miun.dt070a.mqttbroker.error.MalformedMQTTRequestError;
+import se.miun.dt070a.mqttbroker.error.UnknownMessageTypeError;
 import se.miun.dt070a.mqttbroker.request.ConnectRequest;
+import se.miun.dt070a.mqttbroker.request.PingRequest;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.Optional;
 
 public abstract class Request {
@@ -50,19 +55,22 @@ public abstract class Request {
     /*
         Factory method for creating the corresponding Request instances.
      */
-    public static Optional<Request> parseRequest(Socket socket) throws IOException, MalformedMQTTRequestError {
-        //first byte of the header   |0|1|2|3|4|5|6|7
-        //                           |  type |d|QoS|r
-        int flags = socket.getInputStream().read();
+    public static Optional<Request> parseRequest(Socket socket) throws IOException, MalformedMQTTRequestError, ConnectError {
 
         Optional<Request> request;
 
         try {
+            //first byte of the header   |0|1|2|3|4|5|6|7
+            //                           |  type |d|QoS|r
+            int flags = socket.getInputStream().read();
+
             MessageType type = MessageType.headerFlagsToMessageType(flags);
 
             switch (type) {
                 case CONNECT:
                     request = Optional.of(new ConnectRequest(socket)); break;
+                case PINGREQ:
+                    request = Optional.of(new PingRequest(socket)); break;
                 default:
                     request = Optional.empty();  //should not happen (UnknownMessageType is thrown)
             }
@@ -70,6 +78,8 @@ public abstract class Request {
 
         } catch (UnknownMessageTypeError unknownMessageTypeError) {
             throw new MalformedMQTTRequestError("Unknown request type");
+        } catch (SocketException socketException) {
+            throw new ConnectError(socket);
         }
 
         request.ifPresent(r -> {
