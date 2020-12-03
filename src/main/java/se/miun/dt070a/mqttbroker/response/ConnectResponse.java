@@ -1,5 +1,6 @@
 package se.miun.dt070a.mqttbroker.response;
 
+import se.miun.dt070a.mqttbroker.MessageType;
 import se.miun.dt070a.mqttbroker.Response;
 
 import java.net.Socket;
@@ -12,5 +13,15 @@ public class ConnectResponse extends Response {
                                                  // 00000010    Remaining length = 2
                                                  // 00000000    no session
                                                  // 00000000    return code success
+    }
+
+    @Override
+    public MessageType getMessageType() {
+        return MessageType.CONNACK;
+    }
+
+    @Override
+    public byte getMessageTypeAsByte() {
+        return (byte) getMessageType().code;
     }
 }
