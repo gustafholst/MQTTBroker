@@ -24,7 +24,11 @@ public enum MessageType {
 
     public int code;
 
-
+    /* Converts the first byte of MQTT header to a MessageType
+            Flags:
+            |7|6|5|4|3|2|1|0
+            |  type |d|QoS|r
+         */
     public static MessageType headerFlagsToMessageType(int flags) throws UnknownMessageTypeError {
         Optional<MessageType> type = Arrays.stream(values()).filter(v -> (flags >> 4) == v.code).findFirst();
         return type.orElseThrow(UnknownMessageTypeError::new);

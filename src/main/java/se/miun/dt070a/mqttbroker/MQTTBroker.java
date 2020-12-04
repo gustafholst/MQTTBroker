@@ -43,6 +43,8 @@ public class MQTTBroker {
                 return Optional.of(new PingResponse(request.getSocket()));
             case DISCONNECT:
                 return Optional.of(new DisconnectResponse(request.getSocket()));
+            case PUBLISH:
+                MQTTLogger.log("should do something with this!!!");
         }
 
         return Optional.empty();

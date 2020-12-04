@@ -6,6 +6,7 @@ import se.miun.dt070a.mqttbroker.error.UnknownMessageTypeError;
 import se.miun.dt070a.mqttbroker.request.ConnectRequest;
 import se.miun.dt070a.mqttbroker.request.DisconnectRequest;
 import se.miun.dt070a.mqttbroker.request.PingRequest;
+import se.miun.dt070a.mqttbroker.request.PublishRequest;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -61,8 +62,7 @@ public abstract class Request {
         Optional<Request> request;
 
         try {
-            //first byte of the header   |0|1|2|3|4|5|6|7
-            //                           |  type |d|QoS|r
+            //read first byte of the header
             int flags = socket.getInputStream().read();
 
             MessageType type = MessageType.headerFlagsToMessageType(flags);
@@ -74,6 +74,8 @@ public abstract class Request {
                     request = Optional.of(new PingRequest(socket)); break;
                 case DISCONNECT:
                     request = Optional.of(new DisconnectRequest(socket)); break;
+                case PUBLISH:
+                    request = Optional.of(new PublishRequest(socket, flags)); break;
                 default:
                     request = Optional.empty();  //should not happen (UnknownMessageType is thrown)
             }
