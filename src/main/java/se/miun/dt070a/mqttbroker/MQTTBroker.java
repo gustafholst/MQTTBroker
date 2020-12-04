@@ -8,6 +8,7 @@ import io.reactivex.rxjava3.subjects.PublishSubject;
 import io.reactivex.rxjava3.subjects.Subject;
 import se.miun.dt070a.mqttbroker.error.ConnectError;
 import se.miun.dt070a.mqttbroker.response.ConnectResponse;
+import se.miun.dt070a.mqttbroker.response.DisconnectResponse;
 import se.miun.dt070a.mqttbroker.response.PingResponse;
 
 import java.io.*;
@@ -34,16 +35,17 @@ public class MQTTBroker {
     //private Map<String, Client> = new HashMap<>();
 
 
-    private Response handleRequest(Request request) {
+    private Optional<Response> handleRequest(Request request) {
         switch (request.getMessageType()) {
             case CONNECT:
-                return new ConnectResponse(request.getSocket());
+                return Optional.of(new ConnectResponse(request.getSocket()));
             case PINGREQ:
-                return new PingResponse(request.getSocket());
-            default:
-                return null;
-
+                return Optional.of(new PingResponse(request.getSocket()));
+            case DISCONNECT:
+                return Optional.of(new DisconnectResponse(request.getSocket()));
         }
+
+        return Optional.empty();
     }
 
     public void run() throws IOException {
@@ -86,11 +88,12 @@ public class MQTTBroker {
                 if (socket.isClosed()) {
                     emitter.onError(new ConnectError(socket));
                 }
-                Optional<Request> request = Request.parseRequest(socket);
-                emitter.onNext(request);
+                else {
+                    Optional<Request> request = Request.parseRequest(socket);
+                    emitter.onNext(request);
+                }
             }
         })//TODO handle MalformedMQTTRequestError
-                //.subscribeOn(Schedulers.trampoline())
                 .doOnSubscribe(d -> storeDisposable(d, socket))
                 .doOnError(this::handleError)
                 .onErrorComplete(err -> err instanceof ConnectError)
@@ -98,6 +101,8 @@ public class MQTTBroker {
                 .map(Optional::get)
                 .doOnNext(MQTTLogger::logRequest)
                 .map(this::handleRequest)   //response
+                .filter(Optional::isPresent)
+                .map(Optional::get)
                 .doOnNext(MQTTLogger::logResponse)
                 //.doOnDispose(() -> System.out.println("Disposed of connection"))
                 .subscribe(Response::send

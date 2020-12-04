@@ -5,7 +5,7 @@ import java.net.Socket;
 
 public abstract class Response {
 
-    private Socket socket;
+    protected Socket socket;
 
     protected byte[] header;
 

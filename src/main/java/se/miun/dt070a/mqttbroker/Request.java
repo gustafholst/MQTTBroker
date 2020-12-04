@@ -4,6 +4,7 @@ import se.miun.dt070a.mqttbroker.error.ConnectError;
 import se.miun.dt070a.mqttbroker.error.MalformedMQTTRequestError;
 import se.miun.dt070a.mqttbroker.error.UnknownMessageTypeError;
 import se.miun.dt070a.mqttbroker.request.ConnectRequest;
+import se.miun.dt070a.mqttbroker.request.DisconnectRequest;
 import se.miun.dt070a.mqttbroker.request.PingRequest;
 
 import java.io.IOException;
@@ -71,10 +72,11 @@ public abstract class Request {
                     request = Optional.of(new ConnectRequest(socket)); break;
                 case PINGREQ:
                     request = Optional.of(new PingRequest(socket)); break;
+                case DISCONNECT:
+                    request = Optional.of(new DisconnectRequest(socket)); break;
                 default:
                     request = Optional.empty();  //should not happen (UnknownMessageType is thrown)
             }
-
 
         } catch (UnknownMessageTypeError unknownMessageTypeError) {
             throw new MalformedMQTTRequestError("Unknown request type");
