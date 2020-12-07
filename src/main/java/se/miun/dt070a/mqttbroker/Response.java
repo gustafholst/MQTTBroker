@@ -14,7 +14,7 @@ public abstract class Response {
     }
 
     public void send() throws IOException {
-        socket.getOutputStream().write(header);
+       socket.getOutputStream().write(header);
     }
 
     public abstract MessageType getMessageType();

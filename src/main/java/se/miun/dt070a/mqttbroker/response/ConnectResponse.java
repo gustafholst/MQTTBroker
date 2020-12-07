@@ -2,17 +2,18 @@ package se.miun.dt070a.mqttbroker.response;
 
 import se.miun.dt070a.mqttbroker.MessageType;
 import se.miun.dt070a.mqttbroker.Response;
-
-import java.net.Socket;
+import se.miun.dt070a.mqttbroker.Session;
 
 public class ConnectResponse extends Response {
 
-    public ConnectResponse(Socket socket) {
-        super(socket);
-        header = new byte[]{(2 << 4), 2, 0, 0};  // 00110000    CONNACK
-                                                 // 00000010    Remaining length = 2
-                                                 // 00000000    no session
-                                                 // 00000000    return code success
+    public ConnectResponse(Session session) {
+        super(session.getSocket());
+        byte sessionFlag = (byte) (session.isNewSession() ? 0b0 : 0b1);
+
+        header = new byte[]{0b100000, 0b10, sessionFlag, 0b0};  // 00100000    CONNACK
+                                                                // 00000010    Remaining length = 2
+                                                                // 0000000X    session bit
+                                                                // 00000000    return code success
     }
 
     @Override

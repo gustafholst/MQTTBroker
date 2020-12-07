@@ -7,47 +7,65 @@ import io.reactivex.rxjava3.schedulers.Schedulers;
 import io.reactivex.rxjava3.subjects.PublishSubject;
 import io.reactivex.rxjava3.subjects.Subject;
 import se.miun.dt070a.mqttbroker.error.ConnectError;
+import se.miun.dt070a.mqttbroker.request.ConnectRequest;
 import se.miun.dt070a.mqttbroker.response.ConnectResponse;
-import se.miun.dt070a.mqttbroker.response.DisconnectResponse;
 import se.miun.dt070a.mqttbroker.response.PingResponse;
 
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.function.Function;
 
 public class MQTTBroker {
 
     private boolean acceptConnections = true;
-
     private ServerSocket serverSocket;
-
     private Map<Integer, Disposable> disposables;
-
     private Disposable mainDisposable;
-
     private Subject<Socket> connections;
+    private final List<Session> sessions = new ArrayList<>();
 
-    private int socketId = 0;
+    private Session findPreviousSessionOrCreateNew(Request request) {
+        ConnectRequest connectRequest = (ConnectRequest)request;
+        Optional<String> clientId = connectRequest.getClientId();
+        final Socket requestSocket = request.getSocket();
 
-    //private Map<String, Client> = new HashMap<>();
+        Function<Optional<String>, Session> sessionFunction = cid -> cid.map(id -> new Session(requestSocket, id))
+                .orElseGet(() -> new Session(requestSocket));
 
+        Session session = sessionFunction.apply(clientId);
+        if (connectRequest.isCleanSession()) {
+            //create new session using clientId if present otherwise use Session constructor without args which
+            //creates a random id
+            MQTTLogger.log("created new session for client id " + session.getClientId());
+            sessions.add(session);
+            return session;
+        } else {
+            Optional<Session> previousSession = sessions.stream().filter(s -> s.equals(session)).findFirst();
+            previousSession.ifPresent(s -> s.closePreviousSocketAndReplace(request.getSocket()));
+            previousSession.ifPresentOrElse(ps -> MQTTLogger.log("resumed previous session for client id " + session.getClientId())
+                    , () -> MQTTLogger.log("no previous session found. created new session for client id " + session.getClientId()));
+            return previousSession.orElse(session);
+        }
+    }
 
     private Optional<Response> handleRequest(Request request) {
+        Response response = null;
         switch (request.getMessageType()) {
             case CONNECT:
-                return Optional.of(new ConnectResponse(request.getSocket()));
+                Session session = findPreviousSessionOrCreateNew(request);
+                response = new ConnectResponse(session);
+                break;
             case PINGREQ:
-                return Optional.of(new PingResponse(request.getSocket()));
-            case DISCONNECT:
-                return Optional.of(new DisconnectResponse(request.getSocket()));
+                response = new PingResponse(request.getSocket());
+                break;
             case PUBLISH:
                 MQTTLogger.log("should do something with this!!!");
+                break;
+            default:
         }
-
-        return Optional.empty();
+        return Optional.ofNullable(response);
     }
 
     public void run() throws IOException {
@@ -78,9 +96,9 @@ public class MQTTBroker {
         if (error instanceof ConnectError) {
             // send out last LWT in case needed
 
-//            Socket socket = ((ConnectError) error).getSocket();
-//            Disposable d = disposables.get(socket.hashCode());
-            //d.dispose();
+            Socket socket = ((ConnectError) error).getSocket();
+            Disposable d = disposables.get(socket.hashCode());
+            d.dispose();
         }
     }
 
@@ -100,13 +118,12 @@ public class MQTTBroker {
                 .doOnError(this::handleError)
                 .onErrorComplete(err -> err instanceof ConnectError)
                 .filter(Optional::isPresent)
-                .map(Optional::get)
+                .map(Optional::get)         //request
                 .doOnNext(MQTTLogger::logRequest)
-                .map(this::handleRequest)   //response
+                .map(this::handleRequest)
                 .filter(Optional::isPresent)
-                .map(Optional::get)
+                .map(Optional::get)        //response
                 .doOnNext(MQTTLogger::logResponse)
-                //.doOnDispose(() -> System.out.println("Disposed of connection"))
                 .subscribe(Response::send
                         , Throwable::printStackTrace
                         , () -> MQTTLogger.log("Client closed the socket"));
@@ -118,11 +135,9 @@ public class MQTTBroker {
 
     public void shutdown() throws IOException {
         acceptConnections = false;
-//        for (Disposable d : disposables.values()) {
-//            d.dispose();
-//        }
-       // disposables.clear();
-        mainDisposable.dispose();
+        disposables.values().forEach(Disposable::dispose);  //dispose all socket subscriptions
+        disposables.clear();
+        mainDisposable.dispose();  //dispose of incoming sockets stream
         serverSocket.close();
     }
 
@@ -135,7 +150,7 @@ public class MQTTBroker {
         Disposable disposable = Observable.just(broker)
                 .subscribeOn(Schedulers.single())
                 .doOnNext(MQTTBroker::run)
-                //.doOnDispose(broker::shutdown)
+                .doOnDispose(broker::shutdown)
                 .doOnSubscribe(d -> System.out.println("Broker is running...press <enter> to stop"))
                 .subscribe();
 

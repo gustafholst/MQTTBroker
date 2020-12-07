@@ -2,6 +2,7 @@ package se.miun.dt070a.mqttbroker.response;
 
 import se.miun.dt070a.mqttbroker.MessageType;
 import se.miun.dt070a.mqttbroker.Response;
+import se.miun.dt070a.mqttbroker.Session;
 
 import java.net.Socket;
 
