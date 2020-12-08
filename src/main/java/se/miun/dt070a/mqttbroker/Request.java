@@ -3,10 +3,7 @@ package se.miun.dt070a.mqttbroker;
 import se.miun.dt070a.mqttbroker.error.ConnectError;
 import se.miun.dt070a.mqttbroker.error.MalformedMQTTRequestError;
 import se.miun.dt070a.mqttbroker.error.UnknownMessageTypeError;
-import se.miun.dt070a.mqttbroker.request.ConnectRequest;
-import se.miun.dt070a.mqttbroker.request.DisconnectRequest;
-import se.miun.dt070a.mqttbroker.request.PingRequest;
-import se.miun.dt070a.mqttbroker.request.PublishRequest;
+import se.miun.dt070a.mqttbroker.request.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,7 +47,7 @@ public abstract class Request {
         return getInputStream().readNBytes(n);
     }
 
-    public abstract void createFromInputStream() throws IOException;
+    public abstract void createFromInputStream() throws IOException, MalformedMQTTRequestError;
 
     public abstract MessageType getMessageType();
 
@@ -76,6 +73,8 @@ public abstract class Request {
                     request = Optional.of(new DisconnectRequest(socket)); break;
                 case PUBLISH:
                     request = Optional.of(new PublishRequest(socket, flags)); break;
+                case SUBSCRIBE:
+                    request = Optional.of(new SubscribeRequest(socket, flags)); break;
                 default:
                     request = Optional.empty();  //should not happen (UnknownMessageType is thrown)
             }
@@ -86,13 +85,9 @@ public abstract class Request {
             throw new ConnectError(socket);
         }
 
-        request.ifPresent(r -> {
-            try {
-                r.createFromInputStream();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        });
+        if (request.isPresent()) {
+            request.get().createFromInputStream();
+        }
 
         return request;
     }

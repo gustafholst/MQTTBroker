@@ -21,6 +21,14 @@ public class PublishRequest extends Request {
         parseFlags(flags);
     }
 
+    public String getTopic() {
+        return this.topic;
+    }
+
+    public String getPayload() {
+        return this.payload;
+    }
+
     private void parseFlags(int flags) {
                                            // mask        move one step right for value
         this.QoS = (flags & 6) >> 1;       // 00000110 -> 000000XX
