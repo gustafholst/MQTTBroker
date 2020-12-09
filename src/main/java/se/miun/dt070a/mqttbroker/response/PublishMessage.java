@@ -10,10 +10,9 @@ public class PublishMessage extends Response {
 
     private final byte[] packetContent;
 
-    protected PublishMessage(PublishRequest request) {
+    public PublishMessage(PublishRequest request) {
         super(request.getSocket());
         String payloadString = request.getPayload();
-        int fakedFlags = 0b0;
 
         byte[] topic = request.getTopic().getBytes();
         byte topicLengthMSB = (byte) (topic.length & 0b1111111100000000);  //mask out msb
@@ -22,7 +21,7 @@ public class PublishMessage extends Response {
         int topicLengthNumberOfBytes = 2;
         int remainingLength = topicLengthNumberOfBytes + topic.length + payloadString.length();
 
-        header = new byte[]{(byte) (getMessageTypeAsByte() << 4 & fakedFlags) , (byte) remainingLength};
+        header = new byte[]{(byte) (getMessageTypeAsByte() << 4) , (byte) remainingLength};
                                                                         // 0011XXXX    PUBLISH
                                                                         // 00000000    Remaining length = 0
 
@@ -33,14 +32,7 @@ public class PublishMessage extends Response {
 
         packetContent = concatenate(concatenate(header, variableLengthHeader), payLoadBytes);
 
-        //TODO implement dup/QoS/retain (fakedFLags) transfer flags from pubreqest in handleRequest
-    }
-
-    public byte[] concatenate(byte[] a, byte[] b) {
-        byte[] c = new byte[a.length + b.length];
-        System.arraycopy(a, 0, c, 0, a.length);
-        System.arraycopy(b, 0, c, a.length, b.length);
-        return c;
+        //TODO implement dup/QoS/retain transfer flags from pubreqest in handleRequest
     }
 
     @Override

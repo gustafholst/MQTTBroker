@@ -21,6 +21,18 @@ public class PublishRequest extends Request {
         parseFlags(flags);
     }
 
+    public int getQoS() {
+        return QoS;
+    }
+
+    public boolean isDuplicate() {
+        return duplicate;
+    }
+
+    public boolean isRetain() {
+        return retain;
+    }
+
     public String getTopic() {
         return this.topic;
     }

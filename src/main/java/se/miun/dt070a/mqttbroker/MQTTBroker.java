@@ -5,11 +5,16 @@ import io.reactivex.rxjava3.core.Observable;
 import io.reactivex.rxjava3.disposables.Disposable;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import io.reactivex.rxjava3.subjects.PublishSubject;
+import io.reactivex.rxjava3.subjects.ReplaySubject;
 import io.reactivex.rxjava3.subjects.Subject;
 import se.miun.dt070a.mqttbroker.error.ConnectError;
 import se.miun.dt070a.mqttbroker.request.ConnectRequest;
+import se.miun.dt070a.mqttbroker.request.PublishRequest;
+import se.miun.dt070a.mqttbroker.request.SubscribeRequest;
 import se.miun.dt070a.mqttbroker.response.ConnectResponse;
 import se.miun.dt070a.mqttbroker.response.PingResponse;
+import se.miun.dt070a.mqttbroker.response.PublishMessage;
+import se.miun.dt070a.mqttbroker.response.SubscribeResponse;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -25,6 +30,9 @@ public class MQTTBroker {
     private Disposable mainDisposable;
     private Subject<Socket> connections;
     private final List<Session> sessions = new ArrayList<>();
+
+    private final Map<Topic, List<Subscription>> subscriptions = new HashMap<>();
+    private final Map<Topic, Subject<PublishMessage>> publications = new HashMap<>();
 
     private Session findPreviousSessionOrCreateNew(Request request) {
         ConnectRequest connectRequest = (ConnectRequest)request;
@@ -61,17 +69,65 @@ public class MQTTBroker {
                 response = new PingResponse(request.getSocket());
                 break;
             case PUBLISH:
-                MQTTLogger.log("should do something with this!!!");
+                // create new topic or add to existing
+                PublishRequest publishRequest = (PublishRequest)request;
+                Topic topic = Topic.parseString(publishRequest.getTopic());
+                PublishMessage publishMessage = new PublishMessage((PublishRequest) request);
+                if (!subscriptions.containsKey(topic)) {
+                    //prepare a new list of subscriptions
+                    subscriptions.put(topic, new ArrayList<>());  //or ReplaySubject if retain is set
+                    MQTTLogger.log("created new topic \"" + topic.topicString + "\"");
+                }
+                if (!publications.containsKey(topic)) {
+                    publications.put(topic, newPublicationStream(publishRequest.isRetain()));
+                }
+                //send to all subscribers
+                getPublicationStream(topic).onNext(publishMessage);
+                break;
+            case SUBSCRIBE:
+                final SubscribeRequest subscribeRequest = (SubscribeRequest)request;
+                final Socket subscribeSocket = subscribeRequest.getSocket();
+
+                subscribeRequest.getSubscriptions()
+                        .map(Subscription::getTopic)
+                        .flatMap(this::getPublicationStream)
+                        .doOnNext(pm -> pm.socket = subscribeSocket)
+                        .subscribe(PublishMessage::send);
+
+                response = new SubscribeResponse(((SubscribeRequest)request));
                 break;
             default:
         }
         return Optional.ofNullable(response);
     }
 
+    public Subject<PublishMessage> newPublicationStream(boolean retain) {
+        if (retain) {
+            return ReplaySubject.create();
+        }
+        return PublishSubject.create();
+    }
+
+//    public Observable<PublishMessage> getTopics() {
+//        Subject topics = PublishSubject.create();
+//        publications.keySet().stream(t -> topics.onNext(t));
+//    }
+
+    public Subject<PublishMessage> getPublicationStream(Topic topic) {
+        if (publications.containsKey(topic)) {
+            return publications.get(topic);
+        }
+
+        PublishSubject<PublishMessage> error = PublishSubject.create();
+        error.onError(new Throwable("no such topic"));
+        return error;
+    }
+
     public void run() throws IOException {
         disposables = new HashMap<>();
         connections = PublishSubject.create();
 
+        // listen for requests on separate thread
         Completable.create(emitter -> listenForIncomingConnectionRequests())
                 .subscribeOn(Schedulers.single())
                 .subscribe();
@@ -126,7 +182,7 @@ public class MQTTBroker {
                 .doOnNext(MQTTLogger::logResponse)
                 .subscribe(Response::send
                         , Throwable::printStackTrace
-                        , () -> MQTTLogger.log("Client closed the socket"));
+                        , () -> MQTTLogger.log("Socket closed"));
     }
 
     private void storeDisposable(Disposable d, Socket socket) {
