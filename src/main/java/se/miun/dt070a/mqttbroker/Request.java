@@ -75,6 +75,8 @@ public abstract class Request {
                     request = Optional.of(new PublishRequest(socket, flags)); break;
                 case SUBSCRIBE:
                     request = Optional.of(new SubscribeRequest(socket, flags)); break;
+                case UNSCUBSCRIBE:
+                    request = Optional.of(new UnsubscribeRequest(socket)); break;
                 default:
                     request = Optional.empty();  //should not happen (UnknownMessageType is thrown)
             }

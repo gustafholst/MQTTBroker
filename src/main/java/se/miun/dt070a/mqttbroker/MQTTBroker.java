@@ -1,6 +1,8 @@
 package se.miun.dt070a.mqttbroker;
 
+import io.reactivex.rxjava3.annotations.NonNull;
 import io.reactivex.rxjava3.core.Completable;
+import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Observable;
 import io.reactivex.rxjava3.disposables.Disposable;
 import io.reactivex.rxjava3.schedulers.Schedulers;
@@ -11,10 +13,8 @@ import se.miun.dt070a.mqttbroker.error.ConnectError;
 import se.miun.dt070a.mqttbroker.request.ConnectRequest;
 import se.miun.dt070a.mqttbroker.request.PublishRequest;
 import se.miun.dt070a.mqttbroker.request.SubscribeRequest;
-import se.miun.dt070a.mqttbroker.response.ConnectResponse;
-import se.miun.dt070a.mqttbroker.response.PingResponse;
-import se.miun.dt070a.mqttbroker.response.PublishMessage;
-import se.miun.dt070a.mqttbroker.response.SubscribeResponse;
+import se.miun.dt070a.mqttbroker.request.UnsubscribeRequest;
+import se.miun.dt070a.mqttbroker.response.*;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -26,7 +26,7 @@ public class MQTTBroker {
 
     private boolean acceptConnections = true;
     private ServerSocket serverSocket;
-    private Map<Integer, Disposable> disposables;
+    private Map<Integer, Disposable> disposables;    //key: socket hashcode
     private Disposable mainDisposable;
     private Subject<Socket> connections;
     private final List<Session> sessions = new ArrayList<>();
@@ -63,6 +63,7 @@ public class MQTTBroker {
         switch (request.getMessageType()) {
             case CONNECT:
                 Session session = findPreviousSessionOrCreateNew(request);
+                //todo resubscribe to topics
                 response = new ConnectResponse(session);
                 break;
             case PINGREQ:
@@ -75,7 +76,7 @@ public class MQTTBroker {
                 PublishMessage publishMessage = new PublishMessage((PublishRequest) request);
                 if (!subscriptions.containsKey(topic)) {
                     //prepare a new list of subscriptions
-                    subscriptions.put(topic, new ArrayList<>());  //or ReplaySubject if retain is set
+                    subscriptions.put(topic, new ArrayList<>());
                     MQTTLogger.log("created new topic \"" + topic.topicString + "\"");
                 }
                 if (!publications.containsKey(topic)) {
@@ -86,24 +87,51 @@ public class MQTTBroker {
                 break;
             case SUBSCRIBE:
                 final SubscribeRequest subscribeRequest = (SubscribeRequest)request;
-                final Socket subscribeSocket = subscribeRequest.getSocket();
 
                 subscribeRequest.getSubscriptions()
-                        .map(Subscription::getTopic)
-                        .flatMap(this::getPublicationStream)
-                        .doOnNext(pm -> pm.socket = subscribeSocket)
-                        .subscribe(PublishMessage::send);
+                        .doOnNext(this::storeSubscription)
+                        .flatMap(s -> Observable.just(s)
+                                        .map(Subscription::getTopic)
+                                        .map(this::getPublicationStream)
+                                .doOnNext(s::subscribeToTopic))
+                        .subscribe();
 
                 response = new SubscribeResponse(((SubscribeRequest)request));
+                break;
+            case UNSCUBSCRIBE:
+                final UnsubscribeRequest unsubsscribeRequest = (UnsubscribeRequest)request;
+
+                getSubscriptionsForTopic(unsubsscribeRequest.getTopics())
+                        .filter(s -> s.getCurrentSocket().equals(request.getSocket()))
+                        .doFinally(this::deleteUnsubscribedSubscriptions)
+                        .subscribe(Subscription::unscubscribe);
+
+                response = new UnscubscribeResponse(unsubsscribeRequest);
                 break;
             default:
         }
         return Optional.ofNullable(response);
     }
 
+    public Observable<Subscription> getSubscriptionsForTopic(Observable<Topic> topics) {
+        return topics.flatMapIterable(subscriptions::get).filter(Objects::nonNull);
+    }
+
+    public void storeSubscription(Subscription subscription) {
+        subscriptions.get(subscription.getTopic()).add(subscription);
+    }
+
+    public void deleteUnsubscribedSubscriptions() {
+        subscriptions.forEach((key, value) -> value.removeIf(Subscription::isDisposed));
+    }
+
+    public void deleteSubscription(Subscription subscription) {
+        subscriptions.get(subscription.getTopic()).remove(subscription);
+    }
+
     public Subject<PublishMessage> newPublicationStream(boolean retain) {
         if (retain) {
-            return ReplaySubject.create();
+            return ReplaySubject.create(1);  //replay 1 last emission to late subscribers
         }
         return PublishSubject.create();
     }
@@ -123,6 +151,14 @@ public class MQTTBroker {
         return error;
     }
 
+    public Maybe<Session> getSessionUsingSocket(Socket socket) {
+        return getSessions().filter(s -> s.getSocket().equals(socket)).firstElement();
+    }
+
+    public Observable<Session> getSessions() {
+        return Observable.fromIterable(sessions);
+    }
+
     public void run() throws IOException {
         disposables = new HashMap<>();
         connections = PublishSubject.create();
@@ -133,7 +169,6 @@ public class MQTTBroker {
                 .subscribe();
 
         mainDisposable = connections
-                //.flatMap(s -> Observable.just(s).observeOn(Schedulers.io()))
                 .doOnNext(s -> MQTTLogger.log("tcp connection accepted...now waiting for incoming request"))
                 .subscribe(this::listenToSocket);
     }
@@ -181,7 +216,7 @@ public class MQTTBroker {
                 .map(Optional::get)        //response
                 .doOnNext(MQTTLogger::logResponse)
                 .subscribe(Response::send
-                        , Throwable::printStackTrace
+                        , err -> MQTTLogger.log(err.getMessage())
                         , () -> MQTTLogger.log("Socket closed"));
     }
 
@@ -201,7 +236,6 @@ public class MQTTBroker {
         try {
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 
-
         MQTTBroker broker = new MQTTBroker();
         Disposable disposable = Observable.just(broker)
                 .subscribeOn(Schedulers.single())
@@ -218,22 +252,5 @@ public class MQTTBroker {
             e.printStackTrace();
         }
 
-//        Scanner scanner = new Scanner(System.in);
-//
-//        MQTTBroker broker = new MQTTBroker();
-//
-//        broker.start();
-//
-//        System.out.println("Broker is running...\npress <enter> to stop");
-//
-//        scanner.nextLine();
-//
-//        try {
-//            broker.shutdown();
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
-//
-//        System.out.println("Exiting main!");
     }
 }

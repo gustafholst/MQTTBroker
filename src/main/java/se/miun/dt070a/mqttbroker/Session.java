@@ -1,7 +1,11 @@
 package se.miun.dt070a.mqttbroker;
 
+import io.reactivex.rxjava3.core.Observable;
+
 import java.io.IOException;
 import java.net.Socket;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 public class Session {
@@ -9,6 +13,8 @@ public class Session {
     private final String clientId;
     private Socket socket;
     private boolean newSession = true;
+
+    private Set<Subscription> subscriptions = new HashSet<>();
 
     public Session(Socket socket) {
         this(socket, UUID.randomUUID().toString());
@@ -29,6 +35,18 @@ public class Session {
 
     public boolean isNewSession() {
         return newSession;
+    }
+
+    public void addSubscription(Subscription subscription) {
+        subscriptions.add(subscription);
+    }
+
+    public void removeTopic(Subscription subscription) {
+        subscriptions.remove(subscription);
+    }
+
+    public Observable<Subscription> getSubscriptions() {
+        return Observable.fromIterable(subscriptions);
     }
 
     @Override

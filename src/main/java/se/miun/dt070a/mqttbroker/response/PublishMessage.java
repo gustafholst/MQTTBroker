@@ -31,13 +31,12 @@ public class PublishMessage extends Response {
         byte[] payLoadBytes = payloadString.getBytes();
 
         packetContent = concatenate(concatenate(header, variableLengthHeader), payLoadBytes);
-
-        //TODO implement dup/QoS/retain transfer flags from pubreqest in handleRequest
     }
 
     @Override
     public void send() throws IOException {
-        socket.getOutputStream().write(packetContent);
+        if (!socket.isClosed())
+            socket.getOutputStream().write(packetContent);
     }
 
     @Override

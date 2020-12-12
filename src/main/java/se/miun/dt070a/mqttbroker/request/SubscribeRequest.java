@@ -43,7 +43,6 @@ public class SubscribeRequest extends Request {
             return;
 
         try {
-
             /* variable length header */
             int packetIdMSB = nextByteIfRemainingElseThrow();
             int packetIdLSB = nextByteIfRemainingElseThrow();

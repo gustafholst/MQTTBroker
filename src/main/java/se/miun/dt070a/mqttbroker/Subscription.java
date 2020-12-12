@@ -12,6 +12,7 @@ public class Subscription {
 
     public final Topic topic;
     public final int QoS;
+
     private final Socket currentSocket;
 
     private int responseCode = 0;
@@ -34,8 +35,16 @@ public class Subscription {
         disposable.dispose();
     }
 
+    public boolean isDisposed() {
+        return disposable.isDisposed();
+    }
+
     public Topic getTopic() {
         return topic;
+    }
+
+    public Socket getCurrentSocket() {
+        return currentSocket;
     }
 
     public int getResponseCode() {
