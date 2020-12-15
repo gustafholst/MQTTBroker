@@ -125,21 +125,12 @@ public class MQTTBroker {
         subscriptions.forEach((key, value) -> value.removeIf(Subscription::isDisposed));
     }
 
-    public void deleteSubscription(Subscription subscription) {
-        subscriptions.get(subscription.getTopic()).remove(subscription);
-    }
-
     public Subject<PublishMessage> newPublicationStream(boolean retain) {
         if (retain) {
-            return ReplaySubject.create(1);  //replay 1 last emission to late subscribers
+            return ReplaySubject.createWithSize(1);  //replay 1 last emission to late subscribers
         }
         return PublishSubject.create();
     }
-
-//    public Observable<PublishMessage> getTopics() {
-//        Subject topics = PublishSubject.create();
-//        publications.keySet().stream(t -> topics.onNext(t));
-//    }
 
     public Subject<PublishMessage> getPublicationStream(Topic topic) {
         if (publications.containsKey(topic)) {
@@ -149,14 +140,6 @@ public class MQTTBroker {
         PublishSubject<PublishMessage> error = PublishSubject.create();
         error.onError(new Throwable("no such topic"));
         return error;
-    }
-
-    public Maybe<Session> getSessionUsingSocket(Socket socket) {
-        return getSessions().filter(s -> s.getSocket().equals(socket)).firstElement();
-    }
-
-    public Observable<Session> getSessions() {
-        return Observable.fromIterable(sessions);
     }
 
     public void run() throws IOException {
@@ -173,19 +156,9 @@ public class MQTTBroker {
                 .subscribe(this::listenToSocket);
     }
 
-    private void listenForIncomingConnectionRequests() throws IOException {
-        serverSocket = new ServerSocket(1883);
-            while (acceptConnections) {
-                Socket socket = serverSocket.accept();
-                Observable.<Socket>create(emitter -> {
-                    emitter.onNext(socket);
-                }).observeOn(Schedulers.io()).subscribe(connections);
-            }
-    }
-
     private void handleError(Throwable error) {
         if (error instanceof ConnectError) {
-            // send out last LWT in case needed
+            // todo send out last LWT in case needed
 
             Socket socket = ((ConnectError) error).getSocket();
             Disposable d = disposables.get(socket.hashCode());
@@ -232,6 +205,14 @@ public class MQTTBroker {
         serverSocket.close();
     }
 
+    private void listenForIncomingConnectionRequests() throws IOException {
+        serverSocket = new ServerSocket(1883);
+        while (acceptConnections) {
+            Socket socket = serverSocket.accept();
+            Observable.<Socket>create(emitter -> emitter.onNext(socket)).observeOn(Schedulers.io()).subscribe(connections);
+        }
+    }
+
     public static void main(String[] args){
         try {
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
@@ -251,6 +232,5 @@ public class MQTTBroker {
         } catch (IOException e) {
             e.printStackTrace();
         }
-
     }
 }

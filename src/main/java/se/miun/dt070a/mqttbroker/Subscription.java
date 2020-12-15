@@ -5,6 +5,7 @@ import io.reactivex.rxjava3.disposables.Disposable;
 import se.miun.dt070a.mqttbroker.response.PublishMessage;
 
 import java.net.Socket;
+import java.util.concurrent.TimeUnit;
 
 public class Subscription {
 
@@ -28,6 +29,8 @@ public class Subscription {
     public void subscribeToTopic(Observable<PublishMessage> message) {
         disposable = message
                 .doOnNext(pm -> pm.socket = this.currentSocket)
+                .delay(10, TimeUnit.MILLISECONDS)
+                .doOnNext(MQTTLogger::logResponse)
                 .subscribe(Response::send, err -> setFailure());
     }
 
