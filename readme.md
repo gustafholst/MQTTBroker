@@ -1,10 +1,11 @@
 # MQTTbroker
 
-A simple MQTT broker implemented using RxJava. Only the most basic functionality is implemented.
+A simple MQTT broker implemented using RxJava as project assignment in course DT070A IoT Protocols.
+Only the most basic functionality is implemented.
 On the todo list:
-    - Session management
-    - QoS > 0
-    - topic filtering
+ - Session management
+ - QoS > 0
+ - topic filtering
 
 ## Flow of an incoming connection request
 MQTTBroker::listenForIncomingConnectionRequests accepts new conections on the server socket and sends
@@ -33,18 +34,22 @@ and transmitted before any other message.
  
 #### Topic
 The idea was to create a class that could parse a string into subtopics and handle the different wild cards.
-For now, it is just a wrapper for the String class (no extra functionality). 
+For now, it is just a wrapper for the String class (no extra functionality).  
+
 #### Session
 In its current state the broker stores client ids and can recognize if a client has connected before but not more than
 that. TODO: resubscribe to previous subcriptions
-####Subscription
+
+#### Subscription
 Represents a subscription, including a current socket and a topic (and a QoS but this is not yet implemented).
-####MessageType
+
+#### MessageType
 Enum with the names of message types as they appear in the mqqt specification.
-####Request
+
+#### Request
 Base class for request implementations (in the request package)
 
-####Response
+#### Response
 Base class for response implementations (in the response package)
 
 
