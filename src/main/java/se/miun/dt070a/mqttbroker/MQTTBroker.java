@@ -4,6 +4,7 @@ import io.reactivex.rxjava3.annotations.NonNull;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Observable;
+import io.reactivex.rxjava3.core.Observer;
 import io.reactivex.rxjava3.disposables.Disposable;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import io.reactivex.rxjava3.subjects.PublishSubject;
@@ -33,6 +34,7 @@ public class MQTTBroker {
 
     private final Map<Topic, List<Subscription>> subscriptions = new HashMap<>();
     private final Map<Topic, Subject<PublishMessage>> publications = new HashMap<>();
+    private final Map<Topic, PublishMessage> retainedMessages = new HashMap<>();
 
     private Session findPreviousSessionOrCreateNew(Request request) {
         ConnectRequest connectRequest = (ConnectRequest)request;
@@ -74,13 +76,11 @@ public class MQTTBroker {
                 PublishRequest publishRequest = (PublishRequest)request;
                 Topic topic = Topic.parseString(publishRequest.getTopic());
                 PublishMessage publishMessage = new PublishMessage((PublishRequest) request);
-                if (!subscriptions.containsKey(topic)) {
-                    //prepare a new list of subscriptions
-                    subscriptions.put(topic, new ArrayList<>());
-                    MQTTLogger.log("created new topic \"" + topic.topicString + "\"");
+                if (publishRequest.isRetain()) {
+                    retainedMessages.put(topic, publishMessage);
                 }
-                if (!publications.containsKey(topic)) {
-                    publications.put(topic, newPublicationStream(publishRequest.isRetain()));
+                if (!subscriptions.containsKey(topic)) {
+                    addNewTopic(topic);
                 }
                 //send to all subscribers
                 getPublicationStream(topic).onNext(publishMessage);
@@ -93,7 +93,8 @@ public class MQTTBroker {
                         .flatMap(s -> Observable.just(s)
                                         .map(Subscription::getTopic)
                                         .map(this::getPublicationStream)
-                                .doOnNext(s::subscribeToTopic))
+                                        .doOnNext(ps -> s.subscribeToTopic(ps, getRetainedMessage(s.getTopic()))))
+                                        //.doOnNext(s::subscribeToTopic))
                         .subscribe();
 
                 response = new SubscribeResponse(((SubscribeRequest)request));
@@ -113,22 +114,38 @@ public class MQTTBroker {
         return Optional.ofNullable(response);
     }
 
+    private Maybe<PublishMessage> getRetainedMessage(Topic topic) {
+        return Maybe.fromOptional(Optional.ofNullable(retainedMessages.get(topic)));
+    }
+
     public Observable<Subscription> getSubscriptionsForTopic(Observable<Topic> topics) {
         return topics.flatMapIterable(subscriptions::get).filter(Objects::nonNull);
     }
 
+    public void addNewTopic(Topic topic) {
+        if (!subscriptions.containsKey(topic)) {
+            //prepare a new list of subscriptions
+            subscriptions.put(topic, new ArrayList<>());
+            MQTTLogger.log("created new topic \"" + topic.topicString + "\"");
+        }
+        if (!publications.containsKey(topic)) {
+            publications.put(topic, newPublicationStream());
+        }
+    }
+
     public void storeSubscription(Subscription subscription) {
-        subscriptions.get(subscription.getTopic()).add(subscription);
+        Topic topic = subscription.getTopic();
+        if (!subscriptions.containsKey(topic)) {
+            addNewTopic(topic);
+        }
+        subscriptions.get(topic).add(subscription);
     }
 
     public void deleteUnsubscribedSubscriptions() {
         subscriptions.forEach((key, value) -> value.removeIf(Subscription::isDisposed));
     }
 
-    public Subject<PublishMessage> newPublicationStream(boolean retain) {
-        if (retain) {
-            return ReplaySubject.createWithSize(1);  //replay 1 last emission to late subscribers
-        }
+    public Subject<PublishMessage> newPublicationStream() {
         return PublishSubject.create();
     }
 

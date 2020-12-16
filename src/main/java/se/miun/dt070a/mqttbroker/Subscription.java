@@ -1,5 +1,6 @@
 package se.miun.dt070a.mqttbroker;
 
+import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Observable;
 import io.reactivex.rxjava3.disposables.Disposable;
 import se.miun.dt070a.mqttbroker.response.PublishMessage;
@@ -26,8 +27,9 @@ public class Subscription {
         this.QoS = qos;
     }
 
-    public void subscribeToTopic(Observable<PublishMessage> message) {
+    public void subscribeToTopic(Observable<PublishMessage> message, Maybe<PublishMessage> retainedMessage) {
         disposable = message
+                .startWith(retainedMessage)
                 .doOnNext(pm -> pm.socket = this.currentSocket)
                 .delay(10, TimeUnit.MILLISECONDS)
                 .doOnNext(MQTTLogger::logResponse)
