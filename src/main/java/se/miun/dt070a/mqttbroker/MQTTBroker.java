@@ -84,6 +84,11 @@ public class MQTTBroker {
                 }
                 //send to all subscribers
                 getPublicationStream(topic).onNext(publishMessage);
+
+                MQTTLogger.log("Num disposables " + disposables.size());
+                MQTTLogger.log("Num sessions " + sessions.size());
+                MQTTLogger.logTopic(subscriptions, publications);
+                //MQTTLogger.log("Num retainedMessages " + disposables.size());
                 break;
             case SUBSCRIBE:
                 final SubscribeRequest subscribeRequest = (SubscribeRequest)request;
@@ -94,7 +99,6 @@ public class MQTTBroker {
                                         .map(Subscription::getTopic)
                                         .map(this::getPublicationStream)
                                         .doOnNext(ps -> s.subscribeToTopic(ps, getRetainedMessage(s.getTopic()))))
-                                        //.doOnNext(s::subscribeToTopic))
                         .subscribe();
 
                 response = new SubscribeResponse(((SubscribeRequest)request));
@@ -205,9 +209,14 @@ public class MQTTBroker {
                 .filter(Optional::isPresent)
                 .map(Optional::get)        //response
                 .doOnNext(MQTTLogger::logResponse)
+                .doOnComplete(() -> clearDisposables())
                 .subscribe(Response::send
                         , err -> MQTTLogger.log(err.getMessage())
                         , () -> MQTTLogger.log("Socket closed"));
+    }
+
+    private void clearDisposables() {
+        disposables.values().removeIf(Disposable::isDisposed);
     }
 
     private void storeDisposable(Disposable d, Socket socket) {

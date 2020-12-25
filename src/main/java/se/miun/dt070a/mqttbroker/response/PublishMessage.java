@@ -5,6 +5,7 @@ import se.miun.dt070a.mqttbroker.Response;
 import se.miun.dt070a.mqttbroker.request.PublishRequest;
 
 import java.io.IOException;
+import java.net.Socket;
 
 public class PublishMessage extends Response {
 
@@ -37,6 +38,10 @@ public class PublishMessage extends Response {
     public void send() throws IOException {
         if (!socket.isClosed())
             socket.getOutputStream().write(packetContent);
+    }
+
+    public void sendToSocket(Socket receivingSocket) throws IOException {
+        receivingSocket.getOutputStream().write(packetContent);
     }
 
     @Override

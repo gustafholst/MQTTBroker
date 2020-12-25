@@ -27,13 +27,13 @@ public class Subscription {
         this.QoS = qos;
     }
 
-    public void subscribeToTopic(Observable<PublishMessage> message, Maybe<PublishMessage> retainedMessage) {
-        disposable = message
+    public void subscribeToTopic(Observable<PublishMessage> messageStream, Maybe<PublishMessage> retainedMessage) {
+        disposable = messageStream
                 .startWith(retainedMessage)
-                .doOnNext(pm -> pm.socket = this.currentSocket)
+                //.doOnNext(pm -> pm.socket = this.currentSocket)
                 .delay(10, TimeUnit.MILLISECONDS)
                 .doOnNext(MQTTLogger::logResponse)
-                .subscribe(Response::send, err -> setFailure());
+                .subscribe(pm -> pm.sendToSocket(getCurrentSocket()), err -> setFailure());
     }
 
     public void unscubscribe() {
